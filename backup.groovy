@@ -14,7 +14,10 @@ def backupFolder = "/tmp/backup/$date"
 
 def mongo = new Mongo(args[0])
 def configdb = mongo.getDB("admin").command('getCmdLineOpts').parsed.configdb
-def replicas = ['Pablos-Meli-MacBook-Pro.local:31102', 'Pablos-Meli-MacBook-Pro.local:31202']
+def replicas = mongo.getDB("config").getCollection("shards").find().collect {
+  def rsSetHosts = it.host.split("/")[1].split(",")
+  new Mongo(rsSetHosts[0]).getDB("admin").command('replSetGetStatus').members.findAll{ it.stateStr == "SECONDARY"}.max { it.optime }.name
+}
 
 println "Settings:"
 println "mongos   -> ${args[0]}"
@@ -36,7 +39,7 @@ try {
 
   lnprintln "4 Step - Back up the locked replica set members"
   replicas.each {
-    curl -X POST api.melicloud.com/storage/snapshots -H "x-auth-token: TOKEN" -d '{"label":"LABEL", "instance": "INSTANCE"}'
+    //curl -X POST api.melicloud.com/storage/snapshots -H "x-auth-token: TOKEN" -d '{"label":"LABEL", "instance": "INSTANCE"}'
   }
 
   lnprintln "5 Step - Unlock replica set mebers"
