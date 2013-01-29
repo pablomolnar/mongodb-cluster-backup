@@ -2,7 +2,7 @@
 
 import com.mongodb.*
 
-assert args && args[0], "No server to connect was given. Usage backup 127.0.0.1:27017"
+assert args && args[0], "No server to connect was given. Usage: backup 127.0.0.1:27017"
 
 println "----------------"
 println "- Start backup -"
@@ -14,31 +14,56 @@ def backupFolder = "/tmp/backup/$date"
 
 def mongo = new Mongo(args[0])
 def configdb = mongo.getDB("admin").command('getCmdLineOpts').parsed.configdb
+def replicas = ['Pablos-Meli-MacBook-Pro.local:31102', 'Pablos-Meli-MacBook-Pro.local:31202']
 
 println "Settings:"
 println "mongos   -> ${args[0]}"
 println "configdb -> $configdb"
+println "replicas -> $replicas"
 
-lnprintln "1 Step - Stop Balancer"
-stopBalancer()
+try {
+  lnprintln "1 Step - Stop Balancer"
+  stopBalancer()
 
-lnprintln "2 Step - Lock one member of each replica set in each shard"
+  lnprintln "2 Step - Lock one member of each replica set in each shard"
+  replicas.each {
+      def result = new Mongo(it).getDB("admin").command(new BasicDBObject([fsync:1, lock:true]))
+      println "Locking $it: $result"
+  }
 
-lnprintln "3 Step - Backup mongo config server"
-println "mongodump --db config --host $configdb --out $backupFolder".execute().text
+  lnprintln "3 Step - Backup mongo config server"
+  println "mongodump --db config --host $configdb --out $backupFolder".execute().text
 
-lnprintln "4 Step - Back up the locked replica set members"
+  lnprintln "4 Step - Back up the locked replica set members"
+  replicas.each {
+    curl -X POST api.melicloud.com/storage/snapshots -H "x-auth-token: TOKEN" -d '{"label":"LABEL", "instance": "INSTANCE"}'
+  }
 
-lnprintln "5 Step - Unlock replica set mebers"
+  lnprintln "5 Step - Unlock replica set mebers"
+  replicas.each {
+      def result = new Mongo(it).getDB("admin").getCollection('$cmd.sys.unlock').findOne()
+      println "Unlocking $it: $result"
+  }
 
-lnprintln "6 Step - Start Balancer"
-startBalancer()
+} catch(e) {
+  lnprintln "ERRORS:"
+  e.printStackTrace()
+
+} finally {
+
+  lnprintln "6 Step - Start Balancer"
+  startBalancer()
+
+}
+
 
 lnprintln "Backup ended!"
 
 
 
 def lnprintln(String str) { println "\n" + str }
+
+// Balancer Methods
 def startBalancer() { setBalancerSate(true) }
 def stopBalancer() { setBalancerSate(false) }
 
@@ -62,4 +87,3 @@ def setBalancerSate(value) {
   
   println "Balancer status set"
 }
-
